@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List, Dict, Union, Optional
 from dataclasses import dataclass, field
 
-# Your existing dataclasses
 @dataclass
 class Description:
     id: str
