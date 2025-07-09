@@ -1,8 +1,8 @@
 import os
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 
-load_dotenv()
+# load_dotenv()
 
 es = Elasticsearch(
     os.getenv("ES_HOST"),
