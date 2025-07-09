@@ -6,4 +6,5 @@ Steps to setup
  - Use pipenv for dependencies management
  - Add `SnomedCT_InternationalRF2_PRODUCTION_20250501T120000Z` folder in Project root directory
  - Set up ElasticSearch and Kibana Server in Ubuntu environment
- - Run `python scripts/es_indexer.py`
+ - To ingest data in ES run `python teminology_api/es_indexer/indexer.py`
+ - To Test API run `python manage.py runserver`
