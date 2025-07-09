@@ -2,9 +2,8 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Union, Optional
 from dataclasses import dataclass, field
-import numpy as np
 
-# Your existing dataclasses
+
 @dataclass
 class Description:
     id: str
@@ -63,7 +62,7 @@ class RF2PandasReader:
         self.stated_relationships_df: Optional[pd.DataFrame] = None
         self.reference_sets_df: Optional[pd.DataFrame] = None
         
-        # Object collections (for compatibility with your existing interface)
+        # Object collections 
         self.concepts: Dict[str, Concept] = {}
         self.descriptions: List[Description] = []
         self.relationships: List[Relationship] = []
@@ -233,51 +232,51 @@ class RF2PandasReader:
         
         return df
     
-    def read_reference_set_file(self, file_path: Union[str, Path]) -> pd.DataFrame:
-        """
-        Read RF2 Reference Set file using pandas
-        Standard columns: id, effectiveTime, active, moduleId, refsetId, referencedComponentId
-        Additional columns vary by reference set type
-        """
-        print(f"Loading reference set from: {Path(file_path).name}")
+    # def read_reference_set_file(self, file_path: Union[str, Path]) -> pd.DataFrame:
+    #     """
+    #     Read RF2 Reference Set file using pandas
+    #     Standard columns: id, effectiveTime, active, moduleId, refsetId, referencedComponentId
+    #     Additional columns vary by reference set type
+    #     """
+    #     print(f"Loading reference set from: {Path(file_path).name}")
         
-        # Read with string dtype to preserve all data
-        df = pd.read_csv(
-            file_path,
-            sep='\t',
-            dtype=str,
-            encoding='utf-8'
-        )
+    #     # Read with string dtype to preserve all data
+    #     df = pd.read_csv(
+    #         file_path,
+    #         sep='\t',
+    #         dtype=str,
+    #         encoding='utf-8'
+    #     )
         
-        # Convert active column to boolean
-        df['active'] = df['active'] == '1'
+    #     # Convert active column to boolean
+    #     df['active'] = df['active'] == '1'
         
-        # Store DataFrame
-        if self.reference_sets_df is None:
-            self.reference_sets_df = df
-        else:
-            self.reference_sets_df = pd.concat([self.reference_sets_df, df], ignore_index=True)
+    #     # Store DataFrame
+    #     if self.reference_sets_df is None:
+    #         self.reference_sets_df = df
+    #     else:
+    #         self.reference_sets_df = pd.concat([self.reference_sets_df, df], ignore_index=True)
         
-        # Standard RF2 refset columns
-        standard_columns = {'id', 'effectiveTime', 'active', 'moduleId', 'refsetId', 'referencedComponentId'}
+    #     # Standard RF2 refset columns
+    #     standard_columns = {'id', 'effectiveTime', 'active', 'moduleId', 'refsetId', 'referencedComponentId'}
         
-        # Create ReferenceSet objects
-        for _, row in df.iterrows():
-            # Extract additional fields (non-standard columns)
-            additional_fields = {k: v for k, v in row.items() if k not in standard_columns}
+    #     # Create ReferenceSet objects
+    #     for _, row in df.iterrows():
+    #         # Extract additional fields (non-standard columns)
+    #         additional_fields = {k: v for k, v in row.items() if k not in standard_columns}
             
-            reference_set = ReferenceSet(
-                id=row['id'],
-                effective_time=row['effectiveTime'],
-                active=row['active'],
-                module_id=row['moduleId'],
-                refset_id=row['refsetId'],
-                referenced_component_id=row['referencedComponentId'],
-                additional_fields=additional_fields
-            )
-            self.reference_sets.append(reference_set)
+    #         reference_set = ReferenceSet(
+    #             id=row['id'],
+    #             effective_time=row['effectiveTime'],
+    #             active=row['active'],
+    #             module_id=row['moduleId'],
+    #             refset_id=row['refsetId'],
+    #             referenced_component_id=row['referencedComponentId'],
+    #             additional_fields=additional_fields
+    #         )
+    #         self.reference_sets.append(reference_set)
         
-        return df
+    #     return df
     
     def load_rf2_release(self, release_folder: Union[str, Path]):
         """
@@ -309,15 +308,15 @@ class RF2PandasReader:
             self.read_relationships_file(file_path, is_stated=True)
         
         # Find and load reference set files
-        refset_files = list(release_path.glob("**/der2_*Refset_*.txt"))
-        for file_path in refset_files:
-            self.read_reference_set_file(file_path)
+        # refset_files = list(release_path.glob("**/der2_*Refset_*.txt"))
+        # for file_path in refset_files:
+        #     self.read_reference_set_file(file_path)
         
         print(f"\nLoaded:")
         print(f"  Concepts: {len(self.concepts)}")
         print(f"  Descriptions: {len(self.descriptions)}")
         print(f"  Relationships: {len(self.relationships)}")
-        print(f"  Reference Sets: {len(self.reference_sets)}")
+        # print(f"  Reference Sets: {len(self.reference_sets)}")
     
     # Pandas-optimized query methods
     def get_concept_by_id(self, concept_id: str) -> Optional[Concept]:
@@ -431,29 +430,29 @@ def main():
     reader.load_rf2_release("SnomedCT_InternationalRF2_PRODUCTION_20250501T120000Z/Snapshot")
     
     # Example 1: Get concept using original interface
-    concept = reader.get_concept_by_id("73211009")  # Example: Diabetes mellitus
-    if concept:
-        print(f"\nConcept ID: {concept.id}")
-        print(f"Active: {concept.active}")
-        print(f"Descriptions:")
-        for desc in concept.descriptions:
-            print(f"  - {desc.term}")
+    # concept = reader.get_concept_by_id("73211009")  # Example: Diabetes mellitus
+    # if concept:
+    #     print(f"\nConcept ID: {concept.id}")
+    #     print(f"Active: {concept.active}")
+    #     print(f"Descriptions:")
+    #     for desc in concept.descriptions:
+    #         print(f"  - {desc.term}")
     
     # Example 2: Use pandas for efficient queries
-    print("\n=== Pandas Query Examples ===")
+    # print("\n=== Pandas Query Examples ===")
     
-    # Search for diabetes-related concepts
-    diabetes_concepts = reader.search_concepts_by_term("diabetes")
-    print(f"Found {len(diabetes_concepts)} concepts containing 'diabetes'")
+    # # Search for diabetes-related concepts
+    # diabetes_concepts = reader.search_concepts_by_term("diabetes")
+    # print(f"Found {len(diabetes_concepts)} concepts containing 'diabetes'")
     
-    # Get descriptions DataFrame for a concept
-    desc_df = reader.get_descriptions_for_concept_df("73211009")
-    print(f"\nDescriptions for concept 73211009:")
-    print(desc_df[['term', 'typeId', 'active']].to_string(index=False))
+    # # Get descriptions DataFrame for a concept
+    # desc_df = reader.get_descriptions_for_concept_df("73211009")
+    # print(f"\nDescriptions for concept 73211009:")
+    # print(desc_df[['term', 'typeId', 'active']].to_string(index=False))
     
-    # Get relationships for a concept
-    rel_df = reader.get_relationships_for_concept_df("73211009")
-    print(f"\nRelationships for concept 73211009: {len(rel_df)} relationships")
+    # # Get relationships for a concept
+    # rel_df = reader.get_relationships_for_concept_df("73211009")
+    # print(f"\nRelationships for concept 73211009: {len(rel_df)} relationships")
     
     # Memory usage
     print(f"\nMemory usage:")

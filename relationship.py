@@ -15,3 +15,5 @@ class FieldNames:
     TERM = "term"
     TERM_STORED = "term_stored"
     PT_AND_FSN_TERM_LENGTH = "pt_term_len"
+
+# From Java File
