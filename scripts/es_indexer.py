@@ -1,6 +1,9 @@
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from rf2_reader import RF2PandasReader  
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # === Connect to Elasticsearch ===
 es = Elasticsearch(
@@ -71,6 +74,6 @@ if __name__ == "__main__":
     reader = RF2PandasReader()
     reader.load_rf2_release("SnomedCT_InternationalRF2_PRODUCTION_20250501T120000Z/Snapshot")
 
-    index_concepts(reader)
-    index_descriptions(reader)
+    # index_concepts(reader)
+    # index_descriptions(reader)
     index_relationships(reader)
