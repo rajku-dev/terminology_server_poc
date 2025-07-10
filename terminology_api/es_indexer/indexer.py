@@ -1,6 +1,7 @@
 from elasticsearch.helpers import bulk
-from terminology.es_client import es
-from rf2_reader import RF2PandasReader  
+from terminology_api.es_client import es
+from terminology_api.rf2_reader.reader import RF2PandasReader  
+import pandas as pd
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -24,8 +25,13 @@ def index_concepts(reader):
     print(f"✅ Indexed {len(actions)} concepts")
 
 def index_descriptions(reader):
-    actions = [
-        {
+    actions = []
+    skipped = 0
+    for desc in reader.descriptions:
+        if pd.isna(desc.term):  # skip rows where term is NaN
+            skipped += 1
+            continue
+        actions.append({
             "_index": "descriptions",
             "_id": desc.id,
             "_source": {
@@ -36,11 +42,12 @@ def index_descriptions(reader):
                 "type_id": desc.type_id,
                 "case_significance": desc.case_significance
             }
-        }
-        for desc in reader.descriptions
-    ]
-    bulk(es, actions)
-    print(f"✅ Indexed {len(actions)} descriptions")
+        })
+
+    print(f"Skipping {skipped} descriptions with invalid 'term'...")
+    success, _ = bulk(es, actions, raise_on_error=True)
+    print(f"✅ Indexed {success} descriptions")
+
 
 def index_relationships(reader):
     actions = [
