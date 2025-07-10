@@ -1,16 +1,9 @@
-from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
+from terminology.es_client import es
 from rf2_reader import RF2PandasReader  
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# === Connect to Elasticsearch ===
-es = Elasticsearch(
-    "https://localhost:9200",
-    basic_auth=("elastic", "RHf-O0X8RIrGsr77sHnq"),
-    verify_certs=False
-)
 
 # === Indexing Functions ===
 def index_concepts(reader):
