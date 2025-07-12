@@ -135,28 +135,23 @@ def expand_view(request):
         
         logger.info(f"Concept IDs after exclusions: {len(all_concept_ids)}")
         
-        # Apply text filter if provided
+        # OPTIMIZATION: Early termination for text filtering
         if filter_text:
             logger.info(f"Applying text filter: '{filter_text}'")
-            filtered_concepts = filter_concepts_by_text_batch(
-                list(all_concept_ids), filter_text, display_language
+            # Pass count and offset for early termination
+            expansion_contains, total_count = filter_and_paginate_concepts(
+                list(all_concept_ids), filter_text, display_language, 
+                include_designations, count, offset
             )
-            logger.info(f"Concepts after text filtering: {len(filtered_concepts)}")
-            all_concept_ids = set(filtered_concepts)
-        
-        logger.info(f"Final concept count: {len(all_concept_ids)}")
-        
-        # Get total count
-        total_count = len(all_concept_ids)
-        
-        # Apply pagination
-        concept_ids_list = sorted(list(all_concept_ids))
-        paginated_concepts = concept_ids_list[offset:offset + count]
-        
-        # Get concept details in batch
-        expansion_contains = get_concepts_details_batch(
-            paginated_concepts, display_language, include_designations
-        )
+        else:
+            # No text filter - apply pagination directly
+            total_count = len(all_concept_ids)
+            concept_ids_list = sorted(list(all_concept_ids))
+            paginated_concepts = concept_ids_list[offset:offset + count]
+            
+            expansion_contains = get_concepts_details_batch(
+                paginated_concepts, display_language, include_designations
+            )
         
         # Build response
         response = build_expansion_response(
@@ -235,44 +230,32 @@ def find_descendants_batch(concept_id, max_depth=15):
     logger.info(f"Total descendants for {concept_id}: {len(all_descendants)}")
     return all_descendants
 
-def filter_concepts_by_text_batch(concept_ids, filter_text, display_language):
-    """Filter concepts by text using improved batch query"""
+def filter_and_paginate_concepts(concept_ids, filter_text, display_language, 
+                                include_designations, count, offset):
+    """
+    Filter concepts by text using Snowstorm-style matching logic
+    Returns only the concepts needed for the current page
+    """
     if not filter_text or not concept_ids:
-        return concept_ids
+        return [], 0
     
     try:
-        # Process in batches to avoid query size limits
+        # Normalize search text (similar to Snowstorm)
+        normalized_filter = normalize_search_text(filter_text)
+        
         batch_size = 1000
-        matching_concept_ids = set()
+        matching_concepts = []
+        total_matching_count = 0
+        
+        # Track pagination
+        concepts_to_skip = offset
+        concepts_to_collect = count
         
         for i in range(0, len(concept_ids), batch_size):
             batch = concept_ids[i:i + batch_size]
             
-            # Build query for text filtering with multiple search strategies
-            query = {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"terms": {"concept_id": batch}},
-                            {"term": {"active": True}},
-                            {"term": {"language_code": display_language}}
-                        ],
-                        "should": [
-                            # Exact phrase match
-                            {"match_phrase": {"term": filter_text}},
-                            # Wildcard search (case insensitive)
-                            {"wildcard": {"term.keyword": f"*{filter_text}*"}},
-                            # Fuzzy match
-                            {"match": {"term": {"query": filter_text, "fuzziness": "AUTO"}}},
-                            # Prefix match
-                            {"prefix": {"term.keyword": filter_text}}
-                        ],
-                        "minimum_should_match": 1
-                    }
-                },
-                "_source": ["concept_id"],
-                "size": 10000
-            }
+            # Build Snowstorm-style query with multiple matching strategies
+            query = build_snowstorm_text_query(batch, normalized_filter, display_language)
             
             resp = es.search(
                 index="descriptions",
@@ -280,16 +263,282 @@ def filter_concepts_by_text_batch(concept_ids, filter_text, display_language):
                 timeout='30s'
             )
             
-            for hit in resp["hits"]["hits"]:
-                matching_concept_ids.add(hit["_source"]["concept_id"])
+            # Process results with Snowstorm-style scoring
+            batch_concepts = process_search_results(resp, normalized_filter)
+            
+            # Apply pagination logic
+            for concept_data in batch_concepts:
+                total_matching_count += 1
+                
+                if concepts_to_skip > 0:
+                    concepts_to_skip -= 1
+                    continue
+                
+                if concepts_to_collect > 0:
+                    # Get full concept details
+                    concept_details = get_concepts_details_batch(
+                        [concept_data['concept_id']], display_language, include_designations
+                    )
+                    if concept_details:
+                        matching_concepts.extend(concept_details)
+                        concepts_to_collect -= 1
+                
+                # Early termination
+                if concepts_to_collect <= 0:
+                    break
+            
+            # Early termination at batch level
+            if concepts_to_collect <= 0:
+                break
         
-        logger.info(f"Found {len(matching_concept_ids)} concepts matching text '{filter_text}'")
-        return list(matching_concept_ids)
+        # Get accurate total count if needed
+        if concepts_to_collect > 0:
+            total_matching_count = get_total_matching_count(
+                concept_ids, normalized_filter, display_language
+            )
+        
+        logger.info(f"Found {len(matching_concepts)} concepts for page, total matching: {total_matching_count}")
+        return matching_concepts, total_matching_count
         
     except Exception as e:
         logger.error(f"Error filtering concepts by text: {str(e)}")
-        # Return original list if filtering fails
-        return concept_ids
+        return [], 0
+
+def normalize_search_text(text):
+    """
+    Normalize search text similar to Snowstorm's approach
+    """
+    import re
+    import unicodedata
+    
+    # Convert to lowercase
+    text = text.lower()
+    
+    # Remove diacritics (Snowstorm feature)
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    
+    # Remove extra whitespace
+    text = re.sub(r'\s+', ' ', text.strip())
+    
+    return text
+
+# def build_snowstorm_text_query(concept_ids, filter_text, language):
+#     """
+#     Build Elasticsearch query that mimics Snowstorm's text matching strategy
+#     """
+#     # Snowstorm uses multiple query strategies with different boost values
+#     query = {
+#         "query": {
+#             "bool": {
+#                 "must": [
+#                     {"terms": {"concept_id": concept_ids}},
+#                     {"term": {"active": True}},
+#                     {"term": {"language_code": language}}
+#                     {"term": {"type_id": "900000000000013009"}}
+#                 ],
+#                 "should": [
+#                     # 1. Exact phrase match (highest boost) - Snowstorm prioritizes this
+#                     {
+#                         "match_phrase": {
+#                             "term": {
+#                                 "query": filter_text,
+#                                 "boost": 100
+#                             }
+#                         }
+#                     },
+#                     # 2. Exact phrase match on normalized field (if available)
+#                     {
+#                         "match_phrase": {
+#                             "term.folded": {
+#                                 "query": filter_text,
+#                                 "boost": 95
+#                             }
+#                         }
+#                     },
+#                     # 3. Prefix match on exact term (for autocomplete-like behavior)
+#                     {
+#                         "prefix": {
+#                             "term.keyword": {
+#                                 "value": filter_text,
+#                                 "boost": 80
+#                             }
+#                         }
+#                     },
+#                     # 4. All terms must match (AND behavior)
+#                     {
+#                         "match": {
+#                             "term": {
+#                                 "query": filter_text,
+#                                 "operator": "and",
+#                                 "boost": 50
+#                             }
+#                         }
+#                     },
+#                     # 5. All terms must match on folded field
+#                     {
+#                         "match": {
+#                             "term.folded": {
+#                                 "query": filter_text,
+#                                 "operator": "and",
+#                                 "boost": 45
+#                             }
+#                         }
+#                     },
+#                     # 6. Wildcard matching for partial matches
+#                     {
+#                         "wildcard": {
+#                             "term.keyword": {
+#                                 "value": f"*{filter_text}*",
+#                                 "boost": 20
+#                             }
+#                         }
+#                     },
+#                     # 7. Default match (OR behavior) - lowest priority
+#                     {
+#                         "match": {
+#                             "term": {
+#                                 "query": filter_text,
+#                                 "boost": 10
+#                             }
+#                         }
+#                     }
+#                 ],
+#                 "minimum_should_match": 1
+#             }
+#         },
+#         "_source": ["concept_id", "term", "type_id", "language_code"],
+#         "size": 10000,
+#         # Snowstorm-style sorting: score first, then alphabetical
+#         "sort": [
+#             {"_score": {"order": "desc"}},
+#             {"term.keyword": {"order": "asc"}}
+#         ]
+#     }
+    
+#     return query
+
+def build_snowstorm_text_query(concept_ids, filter_text, language):
+    return {
+        "query": {
+            "bool": {
+                "must": [
+                    {"terms": {"concept_id": concept_ids}},
+                    {"term": {"active": True}},
+                    {"term": {"language_code": language}},
+                    {"term": {"type_id": "900000000000013009"}}  # Synonyms only
+                ],
+                "should": [
+                    # Exact phrase (highest priority)
+                    {"match_phrase": {"term": {"query": filter_text, "boost": 10}}},
+                    # Prefix match
+                    {"prefix": {"term": {"value": filter_text, "boost": 5}}},
+                    # All terms must match
+                    {"match": {"term": {"query": filter_text, "operator": "and", "boost": 3}}},
+                    # Any term can match
+                    {"match": {"term": {"query": filter_text, "boost": 1}}}
+                ],
+                "minimum_should_match": 1
+            }
+        }
+    }
+    
+
+def process_search_results(resp, filter_text):
+    """
+    Process search results similar to Snowstorm's approach
+    """
+    # Group by concept_id and keep the best matching description
+    concept_scores = {}
+    
+    for hit in resp["hits"]["hits"]:
+        concept_id = hit["_source"]["concept_id"]
+        term = hit["_source"]["term"]
+        score = hit["_score"]
+        type_id = hit["_source"]["type_id"]
+        
+        # Calculate additional scoring factors (Snowstorm-style)
+        additional_score = calculate_additional_score(term, filter_text, type_id)
+        final_score = score + additional_score
+        
+        # Keep the best scoring description for each concept
+        if concept_id not in concept_scores or final_score > concept_scores[concept_id]['score']:
+            concept_scores[concept_id] = {
+                'concept_id': concept_id,
+                'score': final_score,
+                'term': term,
+                'type_id': type_id
+            }
+    
+    # Sort by final score (descending) then alphabetically
+    sorted_concepts = sorted(
+        concept_scores.values(),
+        key=lambda x: (-x['score'], x['term'].lower())
+    )
+    
+    return sorted_concepts
+
+def calculate_additional_score(term, filter_text, type_id):
+    """
+    Calculate additional scoring factors similar to Snowstorm
+    """
+    additional_score = 0
+    term_lower = term.lower()
+    filter_lower = filter_text.lower()
+    
+    # Exact match bonus
+    if term_lower == filter_lower:
+        additional_score += 50
+    
+    # Starts with bonus
+    elif term_lower.startswith(filter_lower):
+        additional_score += 30
+    
+    # Word boundary match bonus
+    elif f" {filter_lower}" in term_lower or term_lower.startswith(filter_lower):
+        additional_score += 20
+    
+    # Prefer synonyms over FSNs (Snowstorm behavior)
+    if type_id == "900000000000013009":  # Synonym
+        additional_score += 10
+    elif type_id == "900000000000003001":  # FSN
+        additional_score += 5
+    
+    # Length penalty for very long terms (prefer concise matches)
+    if len(term) > 100:
+        additional_score -= 5
+    
+    return additional_score
+
+def get_total_matching_count(concept_ids, filter_text, display_language):
+    """
+    Get total count using the same query logic as filtering
+    """
+    try:
+        query = build_snowstorm_text_query(concept_ids, filter_text, display_language)
+        
+        # Modify for count only
+        query["size"] = 0
+        query["aggs"] = {
+            "unique_concepts": {
+                "cardinality": {
+                    "field": "concept_id"
+                }
+            }
+        }
+        
+        resp = es.search(
+            index="descriptions",
+            body=query,
+            timeout='30s'
+        )
+        
+        return resp["aggregations"]["unique_concepts"]["value"]
+        
+    except Exception as e:
+        logger.error(f"Error getting total matching count: {str(e)}")
+        return 0
+
 
 def get_concepts_details_batch(concept_ids, display_language, include_designations):
     """Get concept details using batch queries with fallback language handling"""
@@ -416,6 +665,16 @@ def build_concept_entry(concept_id, descriptions, include_designations):
     }
     
     if include_designations and designations:
+        # Add display designation (like Snowstorm does)
+        display_designation = {
+            "language": "en",
+            "use": {
+                "system": "http://terminology.hl7.org/CodeSystem/designation-usage",
+                "code": "display"
+            },
+            "value": display_term or concept_id
+        }
+        designations.insert(0, display_designation)  # Add at beginning
         concept_entry["designation"] = designations
     
     return concept_entry
