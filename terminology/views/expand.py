@@ -382,7 +382,6 @@ def process_search_results(resp, filter_text):
         concept_scores.values(),
         key=lambda x: (-x['score'], x['term'].lower())
     )
-    
     return sorted_concepts
 
 def calculate_additional_score(term, filter_text, type_id):
@@ -498,13 +497,17 @@ def get_concepts_details_batch(concept_ids, display_language, include_designatio
                     descriptions_by_concept[concept_id] = []
                 descriptions_by_concept[concept_id].append(hit['_source'])
         
+        # Get preferred terms from language refsets
+        preferred_terms = get_preferred_terms_batch(concept_ids, display_language)
+        
         # Build concept entries
         expansion_contains = []
         for concept_id in concept_ids:
             descriptions = descriptions_by_concept.get(concept_id, [])
+            preferred_term = preferred_terms.get(concept_id)
             
             concept_entry = build_concept_entry(
-                concept_id, descriptions, include_designations
+                concept_id, descriptions, include_designations, preferred_term
             )
             
             if concept_entry:
@@ -517,33 +520,154 @@ def get_concepts_details_batch(concept_ids, display_language, include_designatio
         logger.error(f"Error getting concept details: {str(e)}")
         return []
 
-def build_concept_entry(concept_id, descriptions, include_designations):
+def get_preferred_terms_batch(concept_ids, display_language):
+    """Get preferred terms from language_refsets index - CORRECTED VERSION"""
+    if not concept_ids:
+        return {}
+    
+    try:
+        # Map language codes to refset IDs
+        refset_map = {
+            'en': '900000000000509007',  # US English
+            'en-us': '900000000000509007',  # US English
+            'en-gb': '900000000000508004',  # GB English
+        }
+        
+        refset_id = refset_map.get(display_language, '900000000000509007')
+        
+        # STEP 1: Get all descriptions for the concepts first
+        descriptions_query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"terms": {"concept_id": concept_ids}},
+                        {"term": {"active": True}},
+                        {"term": {"language_code": display_language}},
+                        {"terms": {"type_id": ["900000000000013009", "900000000000003001"]}}  # Only synonyms and FSNs
+                    ]
+                }
+            },
+            "_source": ["concept_id", "type_id", "term"],
+            "size": len(concept_ids) * 10
+        }
+        
+        descriptions_resp = es.search(
+            index="descriptions",
+            body=descriptions_query,
+            timeout='30s'
+        )
+        
+        # Extract description IDs
+        description_ids = [hit['_id'] for hit in descriptions_resp['hits']['hits']]
+        desc_to_concept = {hit['_id']: hit['_source'] for hit in descriptions_resp['hits']['hits']}
+        
+        if not description_ids:
+            logger.info(f"No descriptions found for concepts in language {display_language}")
+            return {}
+        
+        # STEP 2: Check which descriptions are preferred in language_refsets
+        language_refsets_query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"terms": {"referenced_component_id": description_ids}},  # Now using description IDs
+                        {"term": {"refset_id": refset_id}},
+                        {"term": {"active": True}},
+                        {"term": {"acceptability_id": "900000000000548007"}}  # Preferred
+                    ]
+                }
+            },
+            "_source": ["referenced_component_id"],
+            "size": len(description_ids)
+        }
+        
+        refsets_resp = es.search(
+            index="language_refsets",
+            body=language_refsets_query,
+            timeout='30s'
+        )
+        
+        # STEP 3: Build preferred terms mapping - PRIORITIZE SYNONYMS
+        preferred_terms = {}
+        preferred_synonyms = {}  # Track synonyms separately
+        preferred_fsns = {}      # Track FSNs separately
+        
+        for hit in refsets_resp['hits']['hits']:
+            desc_id = hit['_source']['referenced_component_id']
+            
+            if desc_id in desc_to_concept:
+                concept_info = desc_to_concept[desc_id]
+                concept_id = concept_info['concept_id']
+                term = concept_info['term']
+                type_id = concept_info['type_id']
+                
+                # Separate synonyms and FSNs
+                if type_id == "900000000000013009":  # Synonym
+                    if concept_id not in preferred_synonyms:
+                        preferred_synonyms[concept_id] = term
+                elif type_id == "900000000000003001":  # FSN
+                    if concept_id not in preferred_fsns:
+                        preferred_fsns[concept_id] = term
+        
+        # Build final preferred terms - prioritize synonyms over FSNs
+        for concept_id in concept_ids:
+            if concept_id in preferred_synonyms:
+                preferred_terms[concept_id] = preferred_synonyms[concept_id]
+            elif concept_id in preferred_fsns:
+                preferred_terms[concept_id] = preferred_fsns[concept_id]
+        
+        logger.info(f"Found {len(preferred_terms)} preferred terms from language_refsets")
+        return preferred_terms
+        
+    except Exception as e:
+        logger.error(f"Error getting preferred terms from language_refsets: {str(e)}")
+        return {}
+
+
+
+def build_concept_entry(concept_id, descriptions, include_designations, preferred_term=None):
     """Build individual concept entry for expansion"""
     if not descriptions:
         # If no descriptions, still return basic entry
         return {
             "system": "http://snomed.info/sct",
             "code": concept_id,
-            "display": concept_id  # Use concept ID as fallback display
+            "display": preferred_term or concept_id  # Use preferred term if available
         }
     
-    # Find display term (prefer synonym over FSN)
-    display_term = ""
+    # Find display term - use preferred term from language_refsets if available
+    display_term = preferred_term or ""
     designations = []
     
-    # Sort descriptions to prioritize synonyms
-    sorted_descriptions = sorted(descriptions, key=lambda x: (
-        0 if x["type_id"] == "900000000000013009" else 1,  # Synonym first
-        x["term"]
-    ))
-    
-    for desc in sorted_descriptions:
-        # Set display term (first synonym or FSN if no synonym)
-        if not display_term:
-            display_term = desc["term"]
+    # If no preferred term found, fall back to original logic
+    if not display_term:
+        # Sort descriptions to prioritize synonyms
+        sorted_descriptions = sorted(descriptions, key=lambda x: (
+            0 if x["type_id"] == "900000000000013009" else 1,  # Synonym first
+            x["term"]
+        ))
         
-        # Build designations if requested
-        if include_designations:
+        for desc in sorted_descriptions:
+            # Set display term (first synonym or FSN if no synonym)
+            if not display_term:
+                display_term = desc["term"]
+                break
+    
+    # Build designations if requested
+    if include_designations:
+        # Add display designation first (like Snowstorm does)
+        display_designation = {
+            "language": "en",
+            "use": {
+                "system": "http://terminology.hl7.org/CodeSystem/designation-usage",
+                "code": "display"
+            },
+            "value": display_term or concept_id
+        }
+        designations.append(display_designation)
+        
+        # Add other designations from descriptions
+        for desc in descriptions:
             use_system = "http://snomed.info/sct"
             use_code = desc["type_id"]
             use_display = "Synonym"
@@ -572,16 +696,6 @@ def build_concept_entry(concept_id, descriptions, include_designations):
     }
     
     if include_designations and designations:
-        # Add display designation (like Snowstorm does)
-        display_designation = {
-            "language": "en",
-            "use": {
-                "system": "http://terminology.hl7.org/CodeSystem/designation-usage",
-                "code": "display"
-            },
-            "value": display_term or concept_id
-        }
-        designations.insert(0, display_designation)  # Add at beginning
         concept_entry["designation"] = designations
     
     return concept_entry
