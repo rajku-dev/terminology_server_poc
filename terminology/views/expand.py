@@ -429,7 +429,7 @@ def get_total_matching_count(concept_ids, filter_text, display_language):
         query["aggs"] = {
             "unique_concepts": {
                 "cardinality": {
-                    "field": "concept_id"
+                    "field": "concept_id.keyword"
                 }
             }
         }
