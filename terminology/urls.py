@@ -7,6 +7,6 @@ from .views.expand import expand_view
 urlpatterns = [
     path('CodeSystem/$lookup', lookup_view),
     path('CodeSystem/$lookup/', lookup_post_view),
-    path('CodeSystem/$expand', expand_view),
+    path('ValueSet/$expand', expand_view),
     # path('CodeSystem/$validate-code', validate_code_view),
 ]

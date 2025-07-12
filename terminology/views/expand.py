@@ -15,6 +15,7 @@ def expand_view(request):
     """
     try:
         # Parse request parameters
+        # print("Received expand request:", request.data)
         params = request.data.get('parameter', [])
         param_dict = {}
         
@@ -323,100 +324,6 @@ def normalize_search_text(text):
     
     return text
 
-# def build_snowstorm_text_query(concept_ids, filter_text, language):
-#     """
-#     Build Elasticsearch query that mimics Snowstorm's text matching strategy
-#     """
-#     # Snowstorm uses multiple query strategies with different boost values
-#     query = {
-#         "query": {
-#             "bool": {
-#                 "must": [
-#                     {"terms": {"concept_id": concept_ids}},
-#                     {"term": {"active": True}},
-#                     {"term": {"language_code": language}}
-#                     {"term": {"type_id": "900000000000013009"}}
-#                 ],
-#                 "should": [
-#                     # 1. Exact phrase match (highest boost) - Snowstorm prioritizes this
-#                     {
-#                         "match_phrase": {
-#                             "term": {
-#                                 "query": filter_text,
-#                                 "boost": 100
-#                             }
-#                         }
-#                     },
-#                     # 2. Exact phrase match on normalized field (if available)
-#                     {
-#                         "match_phrase": {
-#                             "term.folded": {
-#                                 "query": filter_text,
-#                                 "boost": 95
-#                             }
-#                         }
-#                     },
-#                     # 3. Prefix match on exact term (for autocomplete-like behavior)
-#                     {
-#                         "prefix": {
-#                             "term.keyword": {
-#                                 "value": filter_text,
-#                                 "boost": 80
-#                             }
-#                         }
-#                     },
-#                     # 4. All terms must match (AND behavior)
-#                     {
-#                         "match": {
-#                             "term": {
-#                                 "query": filter_text,
-#                                 "operator": "and",
-#                                 "boost": 50
-#                             }
-#                         }
-#                     },
-#                     # 5. All terms must match on folded field
-#                     {
-#                         "match": {
-#                             "term.folded": {
-#                                 "query": filter_text,
-#                                 "operator": "and",
-#                                 "boost": 45
-#                             }
-#                         }
-#                     },
-#                     # 6. Wildcard matching for partial matches
-#                     {
-#                         "wildcard": {
-#                             "term.keyword": {
-#                                 "value": f"*{filter_text}*",
-#                                 "boost": 20
-#                             }
-#                         }
-#                     },
-#                     # 7. Default match (OR behavior) - lowest priority
-#                     {
-#                         "match": {
-#                             "term": {
-#                                 "query": filter_text,
-#                                 "boost": 10
-#                             }
-#                         }
-#                     }
-#                 ],
-#                 "minimum_should_match": 1
-#             }
-#         },
-#         "_source": ["concept_id", "term", "type_id", "language_code"],
-#         "size": 10000,
-#         # Snowstorm-style sorting: score first, then alphabetical
-#         "sort": [
-#             {"_score": {"order": "desc"}},
-#             {"term.keyword": {"order": "asc"}}
-#         ]
-#     }
-    
-#     return query
 
 def build_snowstorm_text_query(concept_ids, filter_text, language):
     return {
