@@ -15,7 +15,7 @@ A proof-of-concept terminology server for managing and querying medical terminol
 ### 1. Repository Setup
 ```bash
 git clone https://github.com/rajku-dev/terminology_server_poc.git
-cd terminology-server-poc
+cd terminology_server_poc
 ```
 
 ### 2. Environment Setup
