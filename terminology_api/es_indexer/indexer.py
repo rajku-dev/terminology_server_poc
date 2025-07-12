@@ -69,11 +69,31 @@ def index_relationships(reader):
     bulk(es, actions)
     print(f"✅ Indexed {len(actions)} relationships")
 
+def index_language_refset(reader):
+    actions = [
+        {
+            "_index": "language_refsets",
+            "_id": lang_ref.id,
+            "_source": {
+                "effective_time": lang_ref.effective_time,
+                "active": lang_ref.active,
+                "module_id": lang_ref.module_id,
+                "refset_id": lang_ref.refset_id,
+                "referenced_component_id": lang_ref.referenced_component_id,
+                "acceptability_id": lang_ref.acceptability_id
+            }
+        }
+        for lang_ref in reader.language_refsets
+    ]
+    bulk(es, actions)
+    print(f"✅ Indexed {len(actions)} language refsets")
+
 # === Main runner ===
 if __name__ == "__main__":
     reader = RF2PandasReader()
     reader.load_rf2_release("SnomedCT_InternationalRF2_PRODUCTION_20250501T120000Z/Snapshot")
 
-    index_concepts(reader)
-    index_descriptions(reader)
-    index_relationships(reader)
+    # index_concepts(reader)
+    # index_descriptions(reader)
+    # index_relationships(reader)
+    index_language_refset(reader)
