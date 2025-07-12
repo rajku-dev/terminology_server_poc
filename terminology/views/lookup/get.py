@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from terminology_api.es_client import es
 
 @api_view(['GET'])
-def lookup_view(request):
+def lookup_get_view(request):
     system = request.query_params.get("system")
     code = request.query_params.get("code")
     
