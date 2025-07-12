@@ -8,7 +8,7 @@ A proof-of-concept terminology server for managing and querying medical terminol
 - Pipenv
 - ElasticSearch
 - Kibana
-- Ubuntu environment
+- Linux environment
 
 ## Setup Instructions
 
