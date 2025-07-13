@@ -1,6 +1,6 @@
-# ☀️ Terminology Server POC
+# ☀️ Terminology Server
 
-A proof-of-concept terminology server for managing and querying medical terminologies.
+A terminology server for managing and querying medical terminologies.
 
 ## Prerequisites
 
