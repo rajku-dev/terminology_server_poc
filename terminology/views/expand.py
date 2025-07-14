@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from terminology_api.es_client import es
 from datetime import datetime
+# from elasticsearch.exceptions import ElasticsearchException
 import uuid
 import logging
 
@@ -181,56 +182,84 @@ def concept_exists(concept_id):
         logger.error(f"Error checking concept existence for {concept_id}: {str(e)}")
         return False
 
-def find_descendants_batch(concept_id, max_depth=15):
-    """Find all descendants using batch queries with proper depth handling"""
+def find_descendants_batch(concept_id, max_depth=None):
+    """Find all descendants using optimized scroll queries per depth level"""
     all_descendants = set()
     current_level = {concept_id}
-    
-    for depth in range(max_depth):
-        if not current_level:
-            break
-            
-        try:
-            # Use scroll API for large result sets
+    depth = 0
+
+    try:
+        while current_level and (max_depth is None or depth < max_depth):
+            # Initialize scroll for the current level
+            query = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"terms": {"destination_id": list(current_level)}},
+                            {"term": {"type_id": "116680003"}},  # IS-A relationship
+                            {"term": {"active": True}}
+                        ]
+                    }
+                },
+                "_source": ["source_id"],
+                "size": 5000  # Increased batch size
+            }
+
+            # Start scroll
             resp = es.search(
                 index="relationships",
-                body={
-                    "query": {
-                        "bool": {
-                            "must": [
-                                {"terms": {"destination_id": list(current_level)}},
-                                {"term": {"type_id": "116680003"}},  # IS-A relationship
-                                {"term": {"active": True}}
-                            ]
-                        }
-                    },
-                    "_source": ["source_id"],
-                    "size": 10000
-                },
-                timeout='30s'
+                body=query,
+                scroll="5m",  # Increased scroll context lifetime
+                timeout="60s"  # Increased timeout
             )
-            
+
+            scroll_id = resp.get("_scroll_id")
             next_level = set()
+            total_hits = resp.get("hits", {}).get("total", {}).get("value", 0)
+            logger.info(f"Depth {depth}: Query returned {total_hits} total hits")
+
+            # Process initial results
             for hit in resp["hits"]["hits"]:
                 child_id = hit["_source"]["source_id"]
                 if child_id not in all_descendants and child_id != concept_id:
                     all_descendants.add(child_id)
                     next_level.add(child_id)
-            
+
+            # Continue scrolling until no more results
+            scroll_count = len(resp["hits"]["hits"])
+            while resp["hits"]["hits"]:
+                resp = es.scroll(scroll_id=scroll_id, scroll="5m")
+                scroll_count += len(resp["hits"]["hits"])
+                for hit in resp["hits"]["hits"]:
+                    child_id = hit["_source"]["source_id"]
+                    if child_id not in all_descendants and child_id != concept_id:
+                        all_descendants.add(child_id)
+                        next_level.add(child_id)
+
+            logger.info(f"Depth {depth}: Processed {scroll_count} relationships, found {len(next_level)} new descendants")
+
+            # Clear scroll context
+            if scroll_id:
+                try:
+                    es.clear_scroll(scroll_id=scroll_id)
+                except Exception as e:
+                    logger.warning(f"Error clearing scroll for concept {concept_id}: {str(e)}")
+
             current_level = next_level
-            logger.info(f"Depth {depth}: found {len(next_level)} new descendants")
-            
-            # Break if we're not finding new descendants
+            depth += 1
+
             if not next_level:
                 break
-                
-        except Exception as e:
-            logger.error(f"Error finding descendants at depth {depth} for {concept_id}: {str(e)}")
-            break
-    
-    logger.info(f"Total descendants for {concept_id}: {len(all_descendants)}")
-    return all_descendants
 
+        logger.info(f"Total descendants for {concept_id}: {len(all_descendants)}")
+        return all_descendants
+
+    except Exception as e:
+        logger.error(f"Error finding descendants for {concept_id}: {str(e)}", exc_info=True)
+        return all_descendants
+
+
+      
 def filter_and_paginate_concepts(concept_ids, filter_text, display_language, 
                                 include_designations, count, offset):
     """
