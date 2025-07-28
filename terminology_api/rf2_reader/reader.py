@@ -182,13 +182,13 @@ class RF2PandasReader:
         
         return df
     
-    def read_relationships_file(self, file_path: Union[str, Path], is_stated: bool = False) -> pd.DataFrame:
+    def read_relationships_file(self, file_path: Union[str, Path]) -> pd.DataFrame:
         """
         Read RF2 Relationship file using pandas
         Expected columns: id, effectiveTime, active, moduleId, sourceId, destinationId,
                          relationshipGroup, typeId, characteristicTypeId, modifierId
         """
-        print(f"Loading {'stated ' if is_stated else ''}relationships from: {Path(file_path).name}")
+        print(f"Loading relationships from: {Path(file_path).name}")
         
         df = pd.read_csv(
             file_path,
@@ -212,17 +212,12 @@ class RF2PandasReader:
         df['active'] = df['active'] == '1'
         
         # Store DataFrame
-        if is_stated:
-            if self.stated_relationships_df is None:
-                self.stated_relationships_df = df
-            else:
-                self.stated_relationships_df = pd.concat([self.stated_relationships_df, df], ignore_index=True)
-        else:
-            if self.relationships_df is None:
-                self.relationships_df = df
-            else:
-                self.relationships_df = pd.concat([self.relationships_df, df], ignore_index=True)
         
+        if self.relationships_df is None:
+            self.relationships_df = df
+        else:
+            self.relationships_df = pd.concat([self.relationships_df, df], ignore_index=True)
+    
         # Create Relationship objects and link to concepts
         for _, row in df.iterrows():
             relationship = Relationship(
@@ -241,10 +236,7 @@ class RF2PandasReader:
             
             # Link to concept if it exists
             if relationship.source_id in self.concepts:
-                if is_stated:
-                    self.concepts[relationship.source_id].stated_relationships.append(relationship)
-                else:
-                    self.concepts[relationship.source_id].relationships.append(relationship)
+                self.concepts[relationship.source_id].relationships.append(relationship)
         
         return df
     
@@ -294,52 +286,6 @@ class RF2PandasReader:
         
         return df
     
-    # def read_reference_set_file(self, file_path: Union[str, Path]) -> pd.DataFrame:
-    #     """
-    #     Read RF2 Reference Set file using pandas
-    #     Standard columns: id, effectiveTime, active, moduleId, refsetId, referencedComponentId
-    #     Additional columns vary by reference set type
-    #     """
-    #     print(f"Loading reference set from: {Path(file_path).name}")
-        
-    #     # Read with string dtype to preserve all data
-    #     df = pd.read_csv(
-    #         file_path,
-    #         sep='\t',
-    #         dtype=str,
-    #         encoding='utf-8'
-    #     )
-        
-    #     # Convert active column to boolean
-    #     df['active'] = df['active'] == '1'
-        
-    #     # Store DataFrame
-    #     if self.reference_sets_df is None:
-    #         self.reference_sets_df = df
-    #     else:
-    #         self.reference_sets_df = pd.concat([self.reference_sets_df, df], ignore_index=True)
-        
-    #     # Standard RF2 refset columns
-    #     standard_columns = {'id', 'effectiveTime', 'active', 'moduleId', 'refsetId', 'referencedComponentId'}
-        
-    #     # Create ReferenceSet objects
-    #     for _, row in df.iterrows():
-    #         # Extract additional fields (non-standard columns)
-    #         additional_fields = {k: v for k, v in row.items() if k not in standard_columns}
-            
-    #         reference_set = ReferenceSet(
-    #             id=row['id'],
-    #             effective_time=row['effectiveTime'],
-    #             active=row['active'],
-    #             module_id=row['moduleId'],
-    #             refset_id=row['refsetId'],
-    #             referenced_component_id=row['referencedComponentId'],
-    #             additional_fields=additional_fields
-    #         )
-    #         self.reference_sets.append(reference_set)
-        
-    #     return df
-    
     def load_rf2_release(self, release_folder: Union[str, Path]):
         """
         Load a complete RF2 release from a folder containing RF2 files
@@ -350,43 +296,30 @@ class RF2PandasReader:
         release_path = Path(release_folder)
         
         # Find and load concept files
-        # concept_files = list(release_path.glob("**/sct2_Concept_*.txt"))
-        # for file_path in concept_files:
-        #     self.read_concepts_file(file_path)
+        concept_files = list(release_path.glob("**/sct2_Concept_*.txt"))
+        for file_path in concept_files:
+            self.read_concepts_file(file_path)
         
-        # # Find and load description files
-        # description_files = list(release_path.glob("**/sct2_Description_*.txt"))
-        # for file_path in description_files:
-        #     self.read_descriptions_file(file_path)
+        # Find and load description files
+        description_files = list(release_path.glob("**/sct2_Description_*.txt"))
+        for file_path in description_files:
+            self.read_descriptions_file(file_path)
         
         # # Find and load relationship files
-        # relationship_files = list(release_path.glob("**/sct2_Relationship_*.txt"))
-        # for file_path in relationship_files:
-        #     self.read_relationships_file(file_path, is_stated=False)
-        
-        # # Find and load stated relationship files
-        # stated_rel_files = list(release_path.glob("**/sct2_StatedRelationship_*.txt"))
-        # for file_path in stated_rel_files:
-        #     self.read_relationships_file(file_path, is_stated=True)
+        relationship_files = list(release_path.glob("**/sct2_Relationship_*.txt"))
+        for file_path in relationship_files:
+            self.read_relationships_file(file_path)
         
         # Find and load language reference set files
         language_refset_files = list(release_path.glob("**/der2_cRefset_Language*.txt"))
         for file_path in language_refset_files:
             self.read_language_refset_file(file_path)
-        
-        # Find and load other reference set files
-        # refset_files = list(release_path.glob("**/der2_*Refset_*.txt"))
-        # Exclude language refsets as they're handled separately
-        # refset_files = [f for f in refset_files if "Language" not in f.name]
-        # for file_path in refset_files:
-        # #     self.read_reference_set_file(file_path)
 
         print(f"\nLoaded:")
-        # print(f"  Concepts: {len(self.concepts)}")
-        # print(f"  Descriptions: {len(self.descriptions)}")
-        # print(f"  Relationships: {len(self.relationships)}")
+        print(f"  Concepts: {len(self.concepts)}")
+        print(f"  Descriptions: {len(self.descriptions)}")
+        print(f"Relationships: {len(self.relationships)}")
         print(f"  Language Reference Sets: {len(self.language_refsets)}")
-        # print(f"  Other Reference Sets: {len(self.reference_sets)}")
     
     # Pandas-optimized query methods
     def get_concept_by_id(self, concept_id: str) -> Optional[Concept]:
@@ -396,23 +329,6 @@ class RF2PandasReader:
     def get_active_concepts(self) -> List[Concept]:
         """Get all active concepts"""
         return [concept for concept in self.concepts.values() if concept.active]
-    
-    # def get_active_concepts_df(self) -> pd.DataFrame:
-    #     """Get all active concepts as DataFrame"""
-    #     if self.concepts_df is not None:
-    #         return self.concepts_df[self.concepts_df['active'] == True]
-    #     return pd.DataFrame()
-    
-    # def get_descriptions_for_concept(self, concept_id: str) -> List[Description]:
-    #     """Get all descriptions for a specific concept"""
-    #     concept = self.get_concept_by_id(concept_id)
-    #     return concept.descriptions if concept else []
-    
-    # def get_descriptions_for_concept_df(self, concept_id: str) -> pd.DataFrame:
-    #     """Get all descriptions for a specific concept as DataFrame"""
-    #     if self.descriptions_df is not None:
-    #         return self.descriptions_df[self.descriptions_df['conceptId'] == concept_id]
-    #     return pd.DataFrame()
     
     def get_preferred_descriptions_df(self, concept_id: str = None, language_refset_id: str = "900000000000509007") -> pd.DataFrame:
         """
@@ -503,43 +419,6 @@ class RF2PandasReader:
         # Return corresponding concept objects
         return [self.concepts[cid] for cid in concept_ids if cid in self.concepts]
     
-    # def search_concepts_by_term_df(self, search_term: str, case_sensitive: bool = False) -> pd.DataFrame:
-    #     """Search for concepts by description term, return DataFrame"""
-    #     if self.descriptions_df is None:
-    #         return pd.DataFrame()
-        
-    #     search_df = self.descriptions_df[self.descriptions_df['active'] == True]
-        
-    #     if case_sensitive:
-    #         matching_desc = search_df[search_df['term'].str.contains(search_term, na=False)]
-    #     else:
-    #         matching_desc = search_df[search_df['term'].str.contains(search_term, case=False, na=False)]
-        
-    #     return matching_desc
-    
-    # def get_relationships_for_concept_df(self, concept_id: str, is_stated: bool = False) -> pd.DataFrame:
-    #     """Get relationships for a concept as DataFrame"""
-    #     df = self.stated_relationships_df if is_stated else self.relationships_df
-    #     if df is not None:
-    #         return df[df['sourceId'] == concept_id]
-    #     return pd.DataFrame()
-    
-    # def get_concept_hierarchy_df(self, concept_id: str) -> pd.DataFrame:
-    #     """Get parent concepts using IS-A relationships"""
-    #     if self.relationships_df is None:
-    #         return pd.DataFrame()
-        
-    #     # IS-A relationship type ID in SNOMED CT
-    #     isa_type_id = "116680003"
-        
-    #     parents = self.relationships_df[
-    #         (self.relationships_df['sourceId'] == concept_id) &
-    #         (self.relationships_df['typeId'] == isa_type_id) &
-    #         (self.relationships_df['active'] == True)
-    #     ]
-        
-    #     return parents
-    
     def get_language_refset_for_description_df(self, description_id: str) -> pd.DataFrame:
         """Get language reference set entries for a specific description"""
         if self.language_refsets_df is not None:
@@ -571,56 +450,3 @@ class RF2PandasReader:
             usage['reference_sets'] = f"{self.reference_sets_df.memory_usage(deep=True).sum() / 1024**2:.2f} MB"
         
         return usage
-
-
-# # Usage example
-# def main():
-#     reader = RF2PandasReader()
-    
-#     # Load entire release folder
-#     reader.load_rf2_release("SnomedCT_InternationalRF2_PRODUCTION_20250501T120000Z/Snapshot")
-    
-#     # Example 1: Get concept using original interface
-#     concept = reader.get_concept_by_id("73211009")  # Example: Diabetes mellitus
-#     if concept:
-#         print(f"\nConcept ID: {concept.id}")
-#         print(f"Active: {concept.active}")
-#         print(f"Descriptions:")
-#         for desc in concept.descriptions:
-#             print(f"  - {desc.term}")
-    
-#     # Example 2: Use pandas for efficient queries
-#     print("\n=== Pandas Query Examples ===")
-    
-#     # Search for diabetes-related concepts
-#     diabetes_concepts = reader.search_concepts_by_term("diabetes")
-#     print(f"Found {len(diabetes_concepts)} concepts containing 'diabetes'")
-    
-#     # Get preferred descriptions for a concept
-#     preferred_desc = reader.get_preferred_descriptions_df("73211009")
-#     print(f"\nPreferred descriptions for concept 73211009:")
-#     if not preferred_desc.empty:
-#         print(preferred_desc[['term', 'typeId']].to_string(index=False))
-    
-#     # Get acceptable descriptions for a concept
-#     acceptable_desc = reader.get_acceptable_descriptions_df("73211009")
-#     print(f"\nAcceptable descriptions for concept 73211009:")
-#     if not acceptable_desc.empty:
-#         print(acceptable_desc[['term', 'typeId']].to_string(index=False))
-    
-#     # Get language refset info for a description
-#     if not preferred_desc.empty:
-#         desc_id = preferred_desc.iloc[0]['id']
-#         lang_refset = reader.get_language_refset_for_description_df(desc_id)
-#         print(f"\nLanguage refset entries for description {desc_id}:")
-#         if not lang_refset.empty:
-#             print(lang_refset[['refsetId', 'acceptabilityId', 'active']].to_string(index=False))
-    
-#     # Memory usage
-#     print(f"\nMemory usage:")
-#     for component, usage in reader.get_memory_usage().items():
-#         print(f"  {component}: {usage}")
-
-
-# if __name__ == "__main__":
-#     main()
