@@ -1,13 +1,16 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from terminology_api.es_client import es
+from terminology_api.ES.es_client import es
 
 @api_view(['GET'])
 def lookup_get_view(request):
+    """
+    FHIR CodeSystem $lookup operation for SNOMED CT concepts.
+    Returns concept details including designations, properties, and relationships.
+    """
     system = request.query_params.get("system")
     code = request.query_params.get("code")
     
-    # Validate required parameters
     if not system or not code:
         return Response({
             "resourceType": "OperationOutcome",
@@ -18,7 +21,6 @@ def lookup_get_view(request):
             }]
         }, status=400)
     
-    # Validate system
     if system != "http://snomed.info/sct":
         return Response({
             "resourceType": "OperationOutcome",
@@ -30,7 +32,6 @@ def lookup_get_view(request):
         }, status=400)
     
     try:
-        # Get concept - handle 404 properly
         concept_resp = es.get(index="concepts", id=code, ignore=[404])
         if not concept_resp.get("found", False):
             return Response({
@@ -44,7 +45,6 @@ def lookup_get_view(request):
         
         concept = concept_resp['_source']
         
-        # Get descriptions with language reference sets (acceptabilities)
         descriptions_resp = es.search(
             index="descriptions", 
             body={"query": {"term": {"concept_id": code}}}, 
@@ -52,63 +52,49 @@ def lookup_get_view(request):
         )
         descriptions = descriptions_resp["hits"]["hits"]
         
-        # Get language reference set members for acceptability
-        # lang_refset_resp = es.search(
-        #     index="language_refset_members",
-        #     body={"query": {"terms": {"referenced_component_id": [d["_source"]["id"] for d in descriptions]}}},
-        #     size=1000
-        # )
-        # lang_refset_members = {m["_source"]["referenced_component_id"]: m["_source"] for m in lang_refset_resp["hits"]["hits"]}
-        
-        # Get relationships (parents)
         relationships_resp = es.search(
             index="relationships",
             body={"query": {"bool": {"must": [
                 {"term": {"source_id": code}},
-                {"term": {"type_id": "116680003"}},  # IS-A relationship
+                {"term": {"type_id": "116680003"}},
                 {"term": {"active": True}}
             ]}}},
             size=1000
         )
         parents = [r['_source']['destination_id'] for r in relationships_resp["hits"]["hits"]]
         
-        # Get children
         children_resp = es.search(
             index="relationships",
             body={"query": {"bool": {"must": [
                 {"term": {"destination_id": code}},
-                {"term": {"type_id": "116680003"}},  # IS-A relationship
+                {"term": {"type_id": "116680003"}},
                 {"term": {"active": True}}
             ]}}},
             size=1000
         )
         children = [r['_source']['source_id'] for r in children_resp["hits"]["hits"]]
         
-        # Process designations with extensions
         designations = []
-        display_term = ""
+        preferred_term = ""
+        fsn_fallback = ""
         
         for d in descriptions:
             src = d["_source"]
             
             if not src.get("active", True):
                 continue
-                
-            # Get acceptability from language reference set
-            # lang_member = lang_refset_members.get(src["id"])
             
-            # Create extensions for designation use context
+            if src["type_id"] == "900000000000003001":
+                fsn_fallback = src["term"]
+            
+            if src.get("pt", 0) == 1:
+                preferred_term = src["term"]
+            
             extensions = []
             
-            # Add context extensions for US and GB editions
-            for context_code in ["900000000000509007", "900000000000508004"]:  # US/GB editions
-                role_code = "900000000000548007"  # PREFERRED
-                role_display = "PREFERRED"
-                
-                # if lang_member:
-                #     if lang_member.get("acceptability_id") == "900000000000549004":
-                #         role_code = "900000000000549004"
-                #         role_display = "ACCEPTABLE"
+            for context_code in ["900000000000509007", "900000000000508004"]:
+                role_code = "900000000000548007" if src.get("pt", 0) == 1 else "900000000000549004"
+                role_display = "PREFERRED" if src.get("pt", 0) == 1 else "ACCEPTABLE"
                 
                 extension = {
                     "url": "http://snomed.info/fhir/StructureDefinition/designation-use-context",
@@ -140,13 +126,6 @@ def lookup_get_view(request):
                 }
                 extensions.append(extension)
             
-            # Set display term (prefer synonym over FSN for display)
-            if src["type_id"] == "900000000000013009" and not display_term:  # Synonym
-                display_term = src["term"]
-            elif src["type_id"] == "900000000000003001" and not display_term:  # FSN as fallback
-                display_term = src["term"]
-            
-            # Create designation
             designation = {
                 "extension": extensions,
                 "name": "designation",
@@ -165,7 +144,8 @@ def lookup_get_view(request):
             }
             designations.append(designation)
         
-        # Build response parameters - order matters!
+        display_term = preferred_term if preferred_term else fsn_fallback
+        
         parameters = [
             {"name": "code", "valueString": code},
             {"name": "display", "valueString": display_term},
@@ -175,7 +155,6 @@ def lookup_get_view(request):
             {"name": "active", "valueBoolean": concept.get("active", True)},
         ]
         
-        # Add properties
         properties = [
             {
                 "name": "property",
@@ -196,7 +175,6 @@ def lookup_get_view(request):
         parameters.extend(properties)
         parameters.extend(designations)
         
-        # Add parent properties
         for parent_id in parents:
             parameters.append({
                 "name": "property",
@@ -206,7 +184,6 @@ def lookup_get_view(request):
                 ]
             })
         
-        # Add child properties  
         for child_id in children:
             parameters.append({
                 "name": "property",

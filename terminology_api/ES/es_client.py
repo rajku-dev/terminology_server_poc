@@ -1,11 +1,8 @@
 import os
-# from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# load_dotenv()
 
 es = Elasticsearch(
     os.getenv("ES_HOST"),

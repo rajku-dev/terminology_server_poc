@@ -1,6 +1,6 @@
 from elasticsearch.helpers import bulk
-from terminology_api.es_client import es
-from terminology_api.rf2_reader.reader import RF2PandasReader  
+from terminology_api.ES.es_client import es
+from terminology_api.SNOMED.reader import RF2PandasReader  
 import pandas as pd
 import urllib3
 
@@ -94,6 +94,6 @@ if __name__ == "__main__":
     reader.load_rf2_release("SnomedCT_InternationalRF2_PRODUCTION_20250501T120000Z/Snapshot")
 
     # index_concepts(reader)
-    # index_descriptions(reader)
+    index_descriptions(reader)
     # index_relationships(reader)
-    index_language_refset(reader)
+    # index_language_refset(reader)

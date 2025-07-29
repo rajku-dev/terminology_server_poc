@@ -1,6 +1,6 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from terminology_api.es_client import es
+from terminology_api.ES.es_client import es
 import json
 
 @api_view(['POST'])
