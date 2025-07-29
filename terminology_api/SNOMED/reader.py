@@ -296,9 +296,9 @@ class RF2PandasReader:
         release_path = Path(release_folder)
         
         # Find and load concept files
-        # concept_files = list(release_path.glob("**/sct2_Concept_*.txt"))
-        # for file_path in concept_files:
-        #     self.read_concepts_file(file_path)
+        concept_files = list(release_path.glob("**/sct2_Concept_*.txt"))
+        for file_path in concept_files:
+            self.read_concepts_file(file_path)
         
         # Find and load description files
         description_files = list(release_path.glob("**/sct2_Description_*.txt"))
@@ -306,20 +306,20 @@ class RF2PandasReader:
             self.read_descriptions_file(file_path)
         
         # # Find and load relationship files
-        # relationship_files = list(release_path.glob("**/sct2_Relationship_*.txt"))
-        # for file_path in relationship_files:
-        #     self.read_relationships_file(file_path)
+        relationship_files = list(release_path.glob("**/sct2_Relationship_*.txt"))
+        for file_path in relationship_files:
+            self.read_relationships_file(file_path)
         
         # Find and load language reference set files
-        # language_refset_files = list(release_path.glob("**/der2_cRefset_Language*.txt"))
-        # for file_path in language_refset_files:
-        #     self.read_language_refset_file(file_path)
+        language_refset_files = list(release_path.glob("**/der2_cRefset_Language*.txt"))
+        for file_path in language_refset_files:
+            self.read_language_refset_file(file_path)
 
         print(f"\nLoaded:")
-        # print(f"  Concepts: {len(self.concepts)}")
+        print(f"  Concepts: {len(self.concepts)}")
         print(f"  Descriptions: {len(self.descriptions)}")
-        # print(f"Relationships: {len(self.relationships)}")
-        # print(f"  Language Reference Sets: {len(self.language_refsets)}")
+        print(f"Relationships: {len(self.relationships)}")
+        print(f"  Language Reference Sets: {len(self.language_refsets)}")
     
     # Pandas-optimized query methods
     def get_concept_by_id(self, concept_id: str) -> Optional[Concept]:
