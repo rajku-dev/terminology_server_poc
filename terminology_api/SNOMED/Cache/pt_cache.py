@@ -5,12 +5,9 @@ The script processes valuesets, expands them to find all concepts, determines pr
 and updates the descriptions index with pt=1 for preferred terms only (others remain blank).
 """
 
-import json
 import logging
-from datetime import datetime
 from terminology_api.ES.es_client import es
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,6 @@ from elasticsearch.helpers import bulk, parallel_bulk
 from .reader import LoincReader, LoincConcept, LoincPart, LoincAnswer, LoincHierarchy
 from typing import Dict, List, Set
 import logging
-from datetime import datetime
 import time
 
 # Configure logging
@@ -186,7 +185,7 @@ class LoincIndexer:
             "code": concept.code,
             "system": "http://loinc.org",
             "type": "concept",
-            "display": concept.display,
+            "display": concept.long_common_name or concept.display,
             "search_terms": " ".join(filter(None, search_terms)),
             "parents": list(parents) if parents else [],
             "children": list(children) if children else [],
@@ -556,197 +555,6 @@ class LoincIndexer:
         return stats
 
 
-class LoincQueryEngine:
-    """
-    Query engine optimized for FHIR terminology operations.
-    Provides fast $expand, $lookup, and $validate-code operations.
-    """
-    
-    def __init__(self, es_client: Elasticsearch, index_prefix: str = "loinc"):
-        self.es = es_client
-        self.indices = {
-            'concepts': f"{index_prefix}_concepts",
-            'hierarchies': f"{index_prefix}_hierarchies",
-            'lookup': f"{index_prefix}_lookup"
-        }
-    
-    def expand_valueset(self, filter_text: str = None, count: int = 20, 
-                       offset: int = 0, include_designations: bool = True) -> Dict:
-        """
-        FHIR $expand operation - optimized for ValueSet expansion
-        """
-        query = {"match_all": {}}
-        
-        if filter_text:
-           query = {
-            "bool": {
-                "should": [
-                    {"match_phrase_prefix": {"search_terms": filter_text.lower()}},
-                ],
-                "minimum_should_match": 1
-            }
-        }
-
-        search_body = {
-            "query": query,
-            "size": count,
-            "from": offset,
-            "sort": [
-                {"code": {"order": "asc"}}
-            ],
-            "_source": ["code", "system", "display", "type", "designation_value"]
-        }
-        
-        response = self.es.search(index=self.indices['concepts'], body=search_body)
-        
-        # Format as FHIR ValueSet expansion
-        expansion = {
-            "id": f"expansion-{int(time.time())}",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "total": response['hits']['total']['value'],
-            "offset": offset,
-            "contains": []
-        }
-        
-        for hit in response['hits']['hits']:
-            source = hit['_source']
-            
-            concept = {
-                "system": source['system'],
-                "code": source['code'],
-                "display": source['display']
-            }
-            
-            # Add designations if requested and available
-            if include_designations and source.get('designation_value'):
-                if source['designation_value'] != source['display']:
-                    concept["designation"] = [{
-                        "use": {"system": "null", "code": "null"},
-                        "value": source['designation_value']
-                    }]
-            
-            expansion['contains'].append(concept)
-        
-        return expansion
-    
-    def lookup_concept(self, code: str, system: str = "http://loinc.org") -> Dict:
-        """
-        FHIR $lookup operation - fast concept lookup with properties
-        """
-        try:
-            # First try lookup cache for fastest response
-            response = self.es.get(index=self.indices['lookup'], id=code)
-            source = response['_source']
-            
-            result = {
-                "name": "LOINC",
-                "system": system,
-                "display": source['display']
-            }
-            
-            # Add properties if available
-            if source.get('properties'):
-                properties = []
-                for prop_code, prop_value in source['properties'].items():
-                    if prop_value:
-                        properties.append({
-                            "code": prop_code,
-                            "value": prop_value
-                        })
-                if properties:
-                    result["property"] = properties
-            
-            # Add designations if available
-            if source.get('designations'):
-                result["designation"] = source['designations']
-            
-            # Get hierarchical relationships
-            hierarchy_info = self._get_hierarchy_info(code)
-            if hierarchy_info:
-                if 'property' not in result:
-                    result['property'] = []
-                result['property'].extend(hierarchy_info)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Lookup failed for {code}: {e}")
-            return {"error": f"Code {code} not found"}
-    
-    def validate_code(self, code: str, system: str = "http://loinc.org", 
-                     display: str = None) -> Dict:
-        """
-        FHIR $validate-code operation - fast code validation
-        """
-        try:
-            response = self.es.get(index=self.indices['lookup'], id=code)
-            source = response['_source']
-            
-            result = {
-                "result": True,
-                "system": system,
-                "code": code,
-                "display": source['display']
-            }
-            
-            # Validate display if provided
-            if display and display != source['display']:
-                # Check if display matches any designation
-                if source.get('designations'):
-                    display_valid = any(
-                        d.get('value', '').lower() == display.lower() 
-                        for d in source['designations']
-                    )
-                    if not display_valid:
-                        result["message"] = f"Display '{display}' does not match expected '{source['display']}'"
-            
-            return result
-            
-        except Exception as e:
-            return {
-                "result": False,
-                "system": system,
-                "code": code,
-                "message": f"Code {code} not found in system {system}"
-            }
-    
-    def _get_hierarchy_info(self, code: str) -> List[Dict]:
-        """Get parent-child relationships for a code"""
-        try:
-            # Get from main concepts index which has pre-computed relationships
-            response = self.es.get(index=self.indices['concepts'], id=code)
-            source = response['_source']
-            
-            properties = []
-            
-            # Add parent relationships
-            if source.get('parents'):
-                for parent in source['parents']:
-                    properties.append({
-                        "code": "parent",
-                        "value": {
-                            "system": "http://loinc.org",
-                            "code": parent
-                        }
-                    })
-            
-            # Add child relationships (limit to avoid large responses)
-            if source.get('children'):
-                for child in source['children'][:10]:  # Limit children
-                    properties.append({
-                        "code": "child", 
-                        "value": {
-                            "system": "http://loinc.org",
-                            "code": child
-                        }
-                    })
-            
-            return properties
-            
-        except Exception as e:
-            logger.error(f"Failed to get hierarchy info for {code}: {e}")
-            return []
-
 
 # Example usage and main execution
 if __name__ == "__main__":
@@ -777,7 +585,7 @@ if __name__ == "__main__":
         # indexer.create_indices()
         # indexer.index_all_data(reader)
         
-        # # Print statistics
+        # Print statistics
         # stats = indexer.get_index_stats()
         # logger.info("Indexing completed successfully!")
         # logger.info("Index Statistics:")
@@ -789,12 +597,13 @@ if __name__ == "__main__":
         #         logger.error(f"  {index_name}: {index_stats['error']}")
         
         # Test query engine
-        logger.info("Testing query engine...")
-        query_engine = LoincQueryEngine(es, INDEX_PREFIX)
+        # logger.info("Testing query engine...")
+        # query_engine = LoincQueryEngine(es, INDEX_PREFIX)
         
-        # Test expand operation
-        expand_result = query_engine.expand_valueset("diag", count=5)
-        logger.info(f"Expand test: Found {expand_result['total']} results")
+        # # Test expand operation
+        # expand_result = query_engine.expand_valueset("Nucleotide", count=10)
+        # logger.info(f"Expand test: Found {expand_result['total']} results")
+        # print(expand_result)
         
         # Test lookup operation (if we have results)
         # if expand_result['contains']:
@@ -802,7 +611,7 @@ if __name__ == "__main__":
         #     lookup_result = query_engine.lookup_concept(test_code)
         #     logger.info(f"Lookup test: Retrieved info for {test_code}")
         
-        # logger.info("All tests completed successfully!")
+        logger.info("All tests completed successfully!")
         
     except FileNotFoundError as e:
         logger.error(f"LOINC data files not found: {e}")

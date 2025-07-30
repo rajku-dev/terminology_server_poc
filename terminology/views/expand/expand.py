@@ -1,7 +1,9 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from terminology_api.ES.es_client import es
+from terminology_api.LOINC.query_engine import LoincQueryEngine
 from datetime import datetime
+import uuid
 import uuid
 import logging
 
@@ -76,6 +78,11 @@ def expand_view(request):
         for include in includes:
             system = include.get('system')
             if system != 'http://snomed.info/sct':
+                if system == 'http://loinc.org':
+                    query = LoincQueryEngine(es)
+                    loinc_resp = query.expand_valueset(filter_text=filter_text, count=count, offset=offset, include_designations=include_designations)
+                    print("LOINC_RESPONSE", loinc_resp)
+                    return Response(loinc_resp)
                 continue
                 
             # Handle direct concept codes

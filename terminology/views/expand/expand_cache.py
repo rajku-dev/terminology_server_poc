@@ -1,6 +1,7 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from terminology_api.ES.es_client import es
+from terminology_api.LOINC.query_engine import LoincQueryEngine
 from datetime import datetime
 import uuid
 import logging
@@ -32,9 +33,9 @@ def expand_view(request):
                 param_dict[name] = param['resource']
         
         # Extract parameters with defaults
-        valueset_id = param_dict.get('valueset')
+        valueset_id = param_dict.get('valueset', "v_0")
         filter_text = param_dict.get('filter', '')
-        count = min(param_dict.get('count', 100), 1000)
+        count = min(param_dict.get('count', 10), 100)
         offset = param_dict.get('offset', 0)
         display_language = param_dict.get('displayLanguage', 'en')
         include_designations = param_dict.get('includeDesignations', False)
@@ -44,6 +45,7 @@ def expand_view(request):
             display_language = 'en'
         
         print(f"Expand request - ValueSet: {valueset_id}, Language: {display_language}, Count: {count}, Filter: '{filter_text}'")
+        
         
         # Validate required parameters
         if not valueset_id:
@@ -182,7 +184,8 @@ def get_filtered_valueset_expansion(valueset_id, filter_text, display_language, 
     """
     try:
         # Normalize search text
-        normalized_filter = normalize_search_text(filter_text)
+        # normalized_filter = normalize_search_text(filter_text)
+        normalized_filter = filter_text
         
         # Build query with text filtering
         query = {
@@ -198,10 +201,6 @@ def get_filtered_valueset_expansion(valueset_id, filter_text, display_language, 
                         {"match_phrase": {"term": {"query": normalized_filter, "boost": 10}}},
                         # Prefix match
                         {"prefix": {"term": {"value": normalized_filter, "boost": 5}}},
-                        # All terms must match
-                        {"match": {"term": {"query": normalized_filter, "operator": "and", "boost": 3}}},
-                        # Any term can match
-                        {"match": {"term": {"query": normalized_filter, "boost": 1}}}
                     ],
                     "minimum_should_match": 1
                 }
