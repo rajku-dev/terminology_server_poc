@@ -1,7 +1,7 @@
 from django.urls import path
 from .views.lookup import get, post
-# from .views.expand.expand import expand_view
-from .views.expand.expand_cache import expand_view
+from .views.expand.expand import expand_view
+# from .views.expand.expand_cache import expand_view
 # from .views.validate_code import validate_code_view
 
 urlpatterns = [
