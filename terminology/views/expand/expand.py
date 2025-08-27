@@ -78,6 +78,7 @@ def expand_view(request):
         
         # Get all concept IDs from includes
         all_concept_ids = set()
+        include_entire_codesystem = False
         
         for include in includes:
             system = include.get('system')
@@ -87,6 +88,16 @@ def expand_view(request):
                     loinc_resp = query.expand_valueset(filter_text=filter_text, count=count, offset=offset, include_designations=include_designations)
                     return Response(loinc_resp)
                 continue
+            
+            # Check if this include has no specific constraints (empty ValueSet case)
+            has_concepts = 'concept' in include and include['concept']
+            has_filters = 'filter' in include and include['filter']
+            
+            if not has_concepts and not has_filters:
+                # Empty include - expand entire code system
+                include_entire_codesystem = True
+                logger.info("Empty ValueSet detected - will expand from entire SNOMED CT code system")
+                break  # No need to process other includes if we're including everything
                 
             # Handle direct concept codes
             if 'concept' in include:
@@ -112,6 +123,18 @@ def expand_view(request):
                     all_concept_ids.update(descendants)
                     all_concept_ids.add(value)  # Include the concept itself
                     logger.info(f"Found {len(descendants)} descendants for {value}")
+        
+        # Handle entire code system expansion
+        if include_entire_codesystem:
+            if filter_text:
+                # For filtered searches on entire code system, use direct search approach
+                expansion_contains, total_count = get_entire_codesystem_filtered_expansion(
+                    filter_text, display_language, include_designations, count, offset
+                )
+            else:
+                # For unfiltered entire code system, get all active concepts
+                all_concept_ids = get_all_active_concepts()
+                logger.info(f"Retrieved {len(all_concept_ids)} active concepts from entire code system")
         
         logger.info(f"Total concept IDs before exclusions: {len(all_concept_ids)}")
         
@@ -147,7 +170,10 @@ def expand_view(request):
         logger.info(f"Concept IDs after exclusions: {len(all_concept_ids)}")
         
         # Get expansion with efficient filtering and pagination
-        if filter_text:
+        if include_entire_codesystem and filter_text:
+            # Already handled above in get_entire_codesystem_filtered_expansion
+            pass
+        elif filter_text:
             expansion_contains, total_count = get_filtered_expansion(
                 all_concept_ids, filter_text, display_language, include_designations, count, offset
             )
@@ -277,6 +303,113 @@ def get_children_composite(parent_concept_ids):
             break
     
     return children
+
+def get_all_active_concepts():
+    """
+    Get all active concept IDs from the concepts index using composite aggregation
+    """
+    all_concept_ids = set()
+    after_key = None
+    
+    try:
+        while True:
+            query = {
+                "query": {
+                    "term": {"active": True}
+                },
+                "size": 0,
+                "aggs": {
+                    "unique_concepts": {
+                        "composite": {
+                            "size": 10000,
+                            "sources": [
+                                {
+                                    "concept_id": {
+                                        "terms": {
+                                            "field": "_id",
+                                            "order": "asc"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+            
+            if after_key:
+                query["aggs"]["unique_concepts"]["composite"]["after"] = after_key
+            
+            resp = es.search(
+                index="concepts",
+                body=query,
+                timeout='30s'
+            )
+            
+            buckets = resp.get("aggregations", {}).get("unique_concepts", {}).get("buckets", [])
+            
+            if not buckets:
+                break
+                
+            batch_concepts = {bucket["key"]["concept_id"] for bucket in buckets}
+            all_concept_ids.update(batch_concepts)
+            
+            after_key = resp.get("aggregations", {}).get("unique_concepts", {}).get("after_key")
+            if not after_key:
+                break
+                
+        logger.info(f"Retrieved {len(all_concept_ids)} active concepts")
+        return all_concept_ids
+        
+    except Exception as e:
+        logger.error(f"Error getting all active concepts: {str(e)}")
+        return set()
+
+def get_entire_codesystem_filtered_expansion(filter_text, display_language, include_designations, count, offset):
+    """
+    Handle filtered expansion across the entire SNOMED CT code system without pre-filtering by concept IDs
+    """
+    try:
+        # Normalize search text
+        normalized_filter = normalize_search_text(filter_text)
+        
+        # Build query for entire code system with text filtering
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"active": True}},
+                        {"term": {"language_code": display_language}}
+                    ],
+                    "should": [
+                        # Exact phrase (highest priority)
+                        {"match_phrase": {"term": {"query": normalized_filter, "boost": 10}}},
+                        # Prefix match
+                        {"prefix": {"term": {"value": normalized_filter, "boost": 5}}},
+                    ],
+                    "minimum_should_match": 1
+                }
+            },
+            "_source": ["concept_id", "type_id", "term", "language_code"],
+            "size": 10000,  # Get matching descriptions
+            "sort": [
+                {"_score": {"order": "desc"}},
+                {"term.keyword": {"order": "asc"}}
+            ]
+        }
+        
+        # Execute search
+        resp = es.search(
+            index="descriptions",
+            body=query,
+            timeout='30s'
+        )
+        
+        return process_filtered_results(resp, normalized_filter, display_language, include_designations, count, offset)
+        
+    except Exception as e:
+        logger.error(f"Error getting entire code system filtered expansion: {str(e)}")
+        return [], 0
 
 def get_expansion(concept_ids, display_language, include_designations, count, offset):
     """
