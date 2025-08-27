@@ -1,5 +1,4 @@
 import json
-import logging
 from terminology_api.ES.es_client import es
 from collections import defaultdict
 from datetime import datetime

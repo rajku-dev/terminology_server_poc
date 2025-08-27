@@ -1,0 +1,153 @@
+version: '3.8'
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: terminology_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx2g"
+      - http.cors.enabled=true
+      - http.cors.allow-origin="*"
+      - http.cors.allow-headers="X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    networks:
+      - terminology_network
+    mem_limit: 3g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: terminology_kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - terminology_network
+
+  terminology_server:
+    build: .
+    container_name: terminology_server_app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - DJANGO_SETTINGS_MODULE=terminology_server.settings
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - terminology_network
+    command: >
+      sh -c "
+        echo 'Waiting for Elasticsearch to be ready...' &&
+        while ! curl -s http://elasticsearch:9200/_cluster/health | grep -q '\"status\":\"yellow\\|green\"'; do
+          sleep 5
+        done &&
+        echo 'Elasticsearch is ready!' &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+
+  # Service for indexing SNOMED data
+  snomed_indexer:
+    build: .
+    container_name: snomed_indexer
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - terminology_network
+    profiles:
+      - indexing
+    command: >
+      sh -c "
+        echo 'Waiting for Elasticsearch...' &&
+        while ! curl -s http://elasticsearch:9200/_cluster/health | grep -q '\"status\":\"yellow\\|green\"'; do
+          sleep 5
+        done &&
+        echo 'Starting SNOMED indexing...' &&
+        python -m terminology_api.SNOMED.reader &&
+        python -m terminology_api.SNOMED.indexer
+      "
+
+  # Service for indexing LOINC data
+  loinc_indexer:
+    build: .
+    container_name: loinc_indexer
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - terminology_network
+    profiles:
+      - indexing
+    command: >
+      sh -c "
+        echo 'Waiting for Elasticsearch...' &&
+        while ! curl -s http://elasticsearch:9200/_cluster/health | grep -q '\"status\":\"yellow\\|green\"'; do
+          sleep 5
+        done &&
+        echo 'Starting LOINC indexing...' &&
+        python -m terminology_api.LOINC.reader &&
+        python -m terminology_api.LOINC.indexer
+      "
+
+  # Service for Valueset-First approach with caching
+  snomed_cache_optimizer:
+    build: .
+    container_name: snomed_cache_optimizer
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - terminology_network
+    profiles:
+      - valueset-first
+    command: >
+      sh -c "
+        echo 'Waiting for Elasticsearch...' &&
+        while ! curl -s http://elasticsearch:9200/_cluster/health | grep -q '\"status\":\"yellow\\|green\"'; do
+          sleep 5
+        done &&
+        echo 'Starting SNOMED cache optimization...' &&
+        python -m terminology_api.SNOMED.Cache.valueset_cache &&
+        python -m terminology_api.SNOMED.Cache.pt_cache
+      "
+
+volumes:
+  elasticsearch_data:
+    driver: local
+
+networks:
+  terminology_network:
+    driver: bridge
