@@ -1,0 +1,31 @@
+cluster.name: terminology-cluster
+node.name: terminology-node-1
+
+# Network settings
+network.host: 0.0.0.0
+http.port: 9200
+transport.tcp.port: 9300
+
+# Discovery settings for single node
+discovery.type: single-node
+
+# Security settings (disabled for development)
+xpack.security.enabled: false
+
+# Memory settings
+bootstrap.memory_lock: false
+
+# CORS settings for Kibana and other tools
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+http.cors.allow-headers: "X-Requested-With,X-Auth-Token,Content-Type,Content-Length,Authorization"
+
+# Index settings for terminology data
+index.number_of_shards: 1
+index.number_of_replicas: 0
+
+# Increase field limit for complex medical terminologies
+index.mapping.total_fields.limit: 10000
+
+# Increase query result window
+index.max_result_window: 50000
